@@ -121,7 +121,7 @@ The architecture has three layers: a **core library** with pure business logic, 
         ┌──────▼──────┐                  ┌──────▼──────┐
         │   Web API   │                  │     CLI     │
         │             │                  │             │
-        │ Hunchentoot │                  │ SBCL argv   │
+        │ Woo │                  │ SBCL argv   │
         │ WebSocket   │                  │ thin shell  │
         └─────────────┘                  └─────────────┘
                │                                │
@@ -148,7 +148,7 @@ cl-stream/
 │   │   ├── lobbies.lisp         ; lobby state machine (create/join/close)
 │   │   └── sync.lisp            ; playback sync state, drift calc
 │   ├── web/                     ← thin HTTP adapter over core
-│   │   ├── server.lisp          ; Hunchentoot setup, route table
+│   │   ├── server.lisp          ; Woo HTTP server setup, route table
 │   │   ├── routes.lisp          ; HTTP handlers → core function calls
 │   │   ├── websocket.lisp       ; WebSocket handler → core sync functions
 │   │   ├── dash-server.lisp     ; DASH segment file serving
@@ -325,8 +325,8 @@ Environment variables override config (for Docker deployments).
 
 | Library | Purpose |
 |---------|---------|
-| `hunchentoot` | HTTP server |
-| `websocket-driver` or `hunchensocket` | WebSocket server |
+| `woo` | HTTP server |
+| `websocket-driver` or `websocket-driver + woo` | WebSocket server |
 | `cl-sqlite` | SQLite database |
 | `ironclad` | bcrypt password hashing |
 | `uuid` | UUID generation |
@@ -337,7 +337,7 @@ Environment variables override config (for Docker deployments).
 
 ## Open Questions
 
-1. **WebSocket library:** `hunchensocket` (Hunchentoot extension) vs `websocket-driver` (lower-level). Hunchensocket is simpler; websocket-driver is more flexible.
+1. **WebSocket library:** `websocket-driver + woo` (Woo extension) vs `websocket-driver` (lower-level). Hunchensocket is simpler; websocket-driver is more flexible.
 
 2. **HTML generation:** Inline string generation, `cl-who`, or `spinneret`. Spinneret is the modern choice (similar to Hiccup, composable).
 
