@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl ffmpeg jq curl
+
+      - name: Install Quicklisp
+        run: |
+          curl -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --noinform --non-interactive \
+            --load /tmp/quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path (merge-pathnames "quicklisp/" (user-homedir-pathname)))' \
+            --eval '(ql:add-to-init-file)'
+
+      - name: Generate test fixture video
+        run: |
+          mkdir -p tests/fixtures
+          if [ ! -f tests/fixtures/test-video.mp4 ]; then
+            ffmpeg -f lavfi -i testsrc=duration=5:size=320x240:rate=24 \
+                   -f lavfi -i "sine=frequency=440:duration=5" \
+                   -c:v libx264 -c:a aac \
+                   tests/fixtures/test-video.mp4
+          fi
+
+      - name: Load system (build check)
+        run: |
+          sbcl --noinform --non-interactive \
+            --eval '(ql:quickload :cl-stream)' \
+            --eval '(format t "Build OK~%")' \
+            --eval '(sb-ext:exit)'
+
+      - name: Run unit tests
+        run: |
+          sbcl --noinform --non-interactive \
+            --eval '(ql:quickload :cl-stream/tests)' \
+            --eval '(fiveam:run! :auth-suite)' \
+            --eval '(fiveam:run! :dash-suite)' \
+            --eval '(fiveam:run! :lobby-suite)' \
+            --eval '(fiveam:run! :sync-suite)' \
+            --eval '(sb-ext:exit)'
+
+      - name: Run integration tests
+        run: |
+          chmod +x tests/integration/*.sh
+          tests/integration/upload-flow.sh
+          tests/integration/auth-flow.sh
