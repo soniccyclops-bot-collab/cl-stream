@@ -17,7 +17,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y sbcl ffmpeg jq curl
+          sudo apt-get install -y sbcl ffmpeg jq curl libevent-dev libssl-dev
 
       - name: Install Quicklisp
         run: |
