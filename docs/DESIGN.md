@@ -103,46 +103,73 @@ tests/
 
 ## Architecture
 
+The architecture has three layers: a **core library** with pure business logic, and two thin **interface adapters** (web API and CLI) that call into it.
+
 ```
-Browser (upload) ──▶ POST /api/upload   ──▶ FFmpeg worker queue ──▶ DASH segments on disk
-Browser (watch)  ──▶ GET /dash/<id>/    ──▶ Segment file server
-Browser (lobby)  ──▶ WebSocket /ws      ──▶ Lobby coordinator
-Admin browser    ──▶ POST /api/admin/   ──▶ User management
+                ┌──────────────────────────────────────┐
+                │           core library               │
+                │                                      │
+                │  users · videos · lobbies            │
+                │  auth · transcoding · sync state     │
+                │                                      │
+                │  Zero knowledge of HTTP, sockets,    │
+                │  or terminal I/O                     │
+                └──────────────┬───────────────────────┘
+                               │
+               ┌───────────────┴────────────────┐
+               │                                │
+        ┌──────▼──────┐                  ┌──────▼──────┐
+        │   Web API   │                  │     CLI     │
+        │             │                  │             │
+        │ Hunchentoot │                  │ SBCL argv   │
+        │ WebSocket   │                  │ thin shell  │
+        └─────────────┘                  └─────────────┘
+               │                                │
+               ▼                                ▼
+     Browser / DASH player           Integration tests
+     (HTTP + WebSocket)              (shell scripts, direct calls)
 ```
+
+**Why this matters for testing:** Integration tests call the core library directly (or via CLI) — no HTTP stack, no WebSocket handshake, no browser. This tests the real business logic with maximum coverage and minimum complexity. The web API tests are a thin slice verifying routes map correctly. Playwright covers only what can't be tested any other way (actual browser player behavior).
 
 ### Component Map
 
 ```
 cl-stream/
 ├── src/
-│   ├── config.lisp              ; config, startup, data dir init
-│   ├── server.lisp              ; Hunchentoot setup, route table
-│   ├── auth/
-│   │   ├── accounts.lisp        ; users, passwords (bcrypt), roles
-│   │   ├── sessions.lisp        ; session tokens, expiry
-│   │   └── invites.lisp         ; invite link generation, validation
-│   ├── storage/
+│   ├── core/                    ← all business logic lives here
+│   │   ├── config.lisp          ; configuration, data directory
 │   │   ├── db.lisp              ; SQLite connection, migrations
-│   │   ├── schema.sql           ; DDL
-│   │   └── videos.lisp          ; video metadata CRUD
-│   ├── dash/
-│   │   └── transcoder.lisp      ; FFmpeg invocation, progress, queue
-│   ├── web/
-│   │   ├── upload.lisp          ; multipart upload handler
-│   │   ├── dash-server.lisp     ; segment HTTP server, Range support
-│   │   └── views.lisp           ; HTML generation (server-rendered)
-│   └── watch-party/
-│       ├── lobby.lisp           ; lobby state machine
-│       └── websocket.lisp       ; WebSocket server, sync protocol, chat
+│   │   ├── users.lisp           ; create-user, authenticate, roles
+│   │   ├── sessions.lisp        ; session token generation/validation
+│   │   ├── invites.lisp         ; invite link generation, validation
+│   │   ├── videos.lisp          ; video metadata CRUD
+│   │   ├── transcoder.lisp      ; FFmpeg invocation, progress, queue
+│   │   ├── lobbies.lisp         ; lobby state machine (create/join/close)
+│   │   └── sync.lisp            ; playback sync state, drift calc
+│   ├── web/                     ← thin HTTP adapter over core
+│   │   ├── server.lisp          ; Hunchentoot setup, route table
+│   │   ├── routes.lisp          ; HTTP handlers → core function calls
+│   │   ├── websocket.lisp       ; WebSocket handler → core sync functions
+│   │   ├── dash-server.lisp     ; DASH segment file serving
+│   │   └── views.lisp           ; server-rendered HTML
+│   └── cli/                     ← thin CLI adapter over core
+│       └── cli.lisp             ; argument parsing → core function calls
 ├── static/
 │   └── lobby.js                 ; WebSocket client, DASH player sync
-├── tests/                       ; (see above)
+├── tests/
+│   ├── unit/                    ; core library functions in isolation
+│   ├── integration/             ; core library functions end-to-end (no HTTP)
+│   ├── web/                     ; HTTP route mapping (thin slice)
+│   ├── fixtures/
+│   │   └── test-video.mp4       ; 5s 320x240 synthetic video
+│   └── helpers.lisp
 ├── docs/
 │   └── DESIGN.md
 ├── cl-stream.asd
 ├── Dockerfile
 ├── docker-compose.yml
-└── cl-stream.service            ; systemd unit
+└── cl-stream.service
 ```
 
 ---
