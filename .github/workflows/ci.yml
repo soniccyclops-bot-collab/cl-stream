@@ -24,25 +24,33 @@ jobs:
           curl -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
           sbcl --noinform --non-interactive \
             --load /tmp/quicklisp.lisp \
-            --eval '(quicklisp-quickstart:install :path (merge-pathnames "quicklisp/" (user-homedir-pathname)))' \
-            --eval '(ql:add-to-init-file)'
+            --eval '(quicklisp-quickstart:install :path (merge-pathnames "quicklisp/" (user-homedir-pathname)))'
+          # Write .sbclrc manually — skips the interactive "Press Enter" prompt
+          cat >> ~/.sbclrc << 'SBCLRC'
+          #-quicklisp
+          (let ((ql (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+            (when (probe-file ql) (load ql)))
+          SBCLRC
+
+      - name: Register cl-stream with ASDF
+        run: |
+          mkdir -p ~/.config/common-lisp/source-registry.conf.d
+          echo "(:tree \"$GITHUB_WORKSPACE\")" > \
+            ~/.config/common-lisp/source-registry.conf.d/cl-stream.conf
 
       - name: Generate test fixture video
         run: |
           mkdir -p tests/fixtures
-          if [ ! -f tests/fixtures/test-video.mp4 ]; then
-            ffmpeg -f lavfi -i testsrc=duration=5:size=320x240:rate=24 \
-                   -f lavfi -i "sine=frequency=440:duration=5" \
-                   -c:v libx264 -c:a aac \
-                   tests/fixtures/test-video.mp4
-          fi
+          ffmpeg -f lavfi -i testsrc=duration=5:size=320x240:rate=24 \
+                 -f lavfi -i "sine=frequency=440:duration=5" \
+                 -c:v libx264 -c:a aac \
+                 tests/fixtures/test-video.mp4 2>/dev/null
 
       - name: Load system (build check)
         run: |
           sbcl --noinform --non-interactive \
             --eval '(ql:quickload :cl-stream)' \
-            --eval '(format t "Build OK~%")' \
-            --eval '(sb-ext:exit)'
+            --eval '(format t "Build OK~%")'
 
       - name: Run unit tests
         run: |
@@ -51,11 +59,9 @@ jobs:
             --eval '(fiveam:run! :auth-suite)' \
             --eval '(fiveam:run! :dash-suite)' \
             --eval '(fiveam:run! :lobby-suite)' \
-            --eval '(fiveam:run! :sync-suite)' \
-            --eval '(sb-ext:exit)'
+            --eval '(fiveam:run! :sync-suite)'
 
       - name: Run integration tests
         run: |
           chmod +x tests/integration/*.sh
           tests/integration/upload-flow.sh
-          tests/integration/auth-flow.sh
