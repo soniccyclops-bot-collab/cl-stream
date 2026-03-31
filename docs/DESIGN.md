@@ -39,49 +39,64 @@ The foundation. Nothing else starts until this is in place.
 
 Three jobs, must all pass to merge:
 
-1. **Build** — Install SBCL + Quicklisp + FFmpeg, load system, zero warnings
+1. **Build** — Install SBCL + Quicklisp + FFmpeg (`apt install ffmpeg`), load system, zero warnings
 2. **Unit tests** — `(asdf:test-system :cl-stream)`, fast, in-process
-3. **Integration tests** — Spin up real server (in-process), real SQLite (temp dir), mock FFmpeg
+3. **Integration tests** — Shell scripts via the CLI against a running server instance
 
-### Mock FFmpeg
+### No Mock FFmpeg
 
-A shell script `tests/mock-ffmpeg.sh` that:
-- Accepts the same arguments as real FFmpeg
-- Writes minimal valid DASH output (a few tiny segments + manifest)
-- Exits 0 immediately
+FFmpeg runs for real in CI. The test video is a 5-10 second, 320x240 synthetic clip checked into `tests/fixtures/test-video.mp4`:
 
-This makes integration tests fast and deterministic — no actual video encoding.
+```bash
+ffmpeg -f lavfi -i testsrc=duration=5:size=320x240:rate=24 \
+       -f lavfi -i "sine=frequency=440:duration=5" \
+       -c:v libx264 -c:a aac tests/fixtures/test-video.mp4
+```
 
-### E2E Tests (Playwright)
+Transcodes in under 10 seconds on a CI runner. Same code path as production. No lies about what actually works.
 
-Browser-based tests against a running cl-stream server. Test scenarios built incrementally as features land:
+### CLI-First E2E Architecture
 
-- Auth flows (login, account creation, invite links)
-- Upload + transcoding status polling + playback
-- Watch party: join, play/pause/seek sync, chat
+The server exposes a full CLI for all business operations. This is the primary E2E testing surface — no browser required.
 
-DASH fixture files (`tests/fixtures/`) are pre-transcoded minimal valid segments checked into the repo. E2E tests use fixtures, not live FFmpeg.
+**Why:** Shell scripts + curl + websocat cover 90% of E2E value in <5 seconds total vs 30+ seconds for Playwright. The CLI is also the production admin interface.
+
+```bash
+# Start server
+cl-stream server --port 9999 --data-dir /tmp/test-data &
+SERVER_PID=$!; trap "kill $SERVER_PID" EXIT
+
+# Drive all business logic via CLI
+cl-stream users create alice alice-pass
+VIDEO_ID=$(cl-stream videos upload tests/fixtures/test-video.mp4 \
+           --title "Test" --user alice --json | jq -r .video_id)
+cl-stream videos wait $VIDEO_ID --timeout 60
+curl -f http://localhost:9999/dash/$VIDEO_ID/manifest.mpd
+
+LOBBY_ID=$(cl-stream lobbies create $VIDEO_ID --name "Party" --json | jq -r .lobby_id)
+websocat ws://localhost:9999/ws  # verify sync protocol
+```
+
+### Playwright Layer (Optional, Later)
+
+Add Playwright only if visual player behavior needs verification (DASH adaptive bitrate switching, actual sync accuracy in browser). Not needed for core business logic coverage.
 
 ### Test File Layout
 
 ```
 tests/
 ├── unit/
-│   ├── auth-test.lisp          ; password hashing, sessions, invites
-│   ├── dash-test.lisp          ; FFmpeg command generation
+│   ├── auth-test.lisp          ; bcrypt, sessions, invite tokens
+│   ├── dash-test.lisp          ; FFmpeg command args generation
 │   ├── lobby-test.lisp         ; lobby state machine
 │   └── sync-test.lisp          ; WebSocket protocol, drift calc
 ├── integration/
-│   ├── upload-flow-test.lisp   ; upload → transcode → ready
-│   └── watch-party-test.lisp   ; lobby → invite → join → sync
-├── e2e/
-│   ├── auth.spec.ts            ; Playwright: login, registration, invites
-│   ├── upload.spec.ts          ; Playwright: upload, playback
-│   └── watch-party.spec.ts     ; Playwright: full lobby sync flow
+│   ├── upload-flow.sh          ; upload → transcode → ready (CLI + curl)
+│   ├── auth-flow.sh            ; user create → login → session
+│   └── watch-party-flow.sh     ; lobby → invite → join → sync (websocat)
 ├── fixtures/
-│   └── test-video/             ; minimal DASH manifest + segments
-├── mock-ffmpeg.sh              ; fake FFmpeg for integration tests
-└── helpers.lisp                ; test utilities, server setup/teardown
+│   └── test-video.mp4          ; 5s 320x240 synthetic video
+└── helpers.lisp                ; unit test utilities, server setup/teardown
 ```
 
 ---
