@@ -321,12 +321,38 @@ Environment variables override config (for Docker deployments).
 
 ---
 
+## Concurrency Architecture
+
+Two complementary models:
+
+- **Woo event loop** — all HTTP/WebSocket I/O, non-blocking, handles many concurrent connections without threads
+- **lparallel kernel** — CPU-bound work (FFmpeg transcoding) runs in a separate thread pool, off the event loop so it never blocks request handling
+- **Channels (lparallel queues)** — bridge between Woo I/O handlers and lparallel workers
+
+```
+Woo event loop (I/O)
+  │
+  ├── HTTP request → route handler → core fn → response
+  ├── WebSocket message → sync state update → broadcast
+  └── Upload complete → push to lparallel channel
+                              │
+                    lparallel kernel (CPU)
+                      │
+                      ├── FFmpeg worker 1 → transcode video
+                      ├── FFmpeg worker 2 → transcode video
+                      └── ... (configurable pool size)
+```
+
+This mirrors Go's model: fast I/O concurrency on the event loop, parallel CPU work in the thread pool.
+
 ## Dependencies
 
 | Library | Purpose |
 |---------|---------|
-| `woo` | HTTP server |
-| `websocket-driver` or `websocket-driver + woo` | WebSocket server |
+| `woo` | High-performance async HTTP server (event-loop, libuv) |
+| `lparallel` | Worker pools, futures, channels — parallel FFmpeg transcoding |
+| `bordeaux-threads` | Low-level threading (lparallel dependency) |
+| `websocket-driver` | WebSocket server |
 | `cl-sqlite` | SQLite database |
 | `ironclad` | bcrypt password hashing |
 | `uuid` | UUID generation |
