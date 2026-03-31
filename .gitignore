@@ -1,0 +1,9 @@
+*.fasl
+*.dx64fsl
+data/
+uploads/
+segments/
+.idea/
+.vscode/
+*.swp
+.DS_Store
